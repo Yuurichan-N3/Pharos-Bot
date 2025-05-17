@@ -40,6 +40,36 @@ BANNER = f"""
 ╚════════════════════════════════════════════════╝{Style.RESET_ALL}
 """
 
+def load_proxies():
+    try:
+        if not os.path.exists("proxy.txt"):
+            print(f"{Fore.YELLOW}File proxy.txt tidak ditemukan, berjalan tanpa proxy{Style.RESET_ALL}")
+            return []
+        with open("proxy.txt", "r") as f:
+            proxies = [line.strip() for line in f if line.strip()]
+        if not proxies:
+            print(f"{Fore.YELLOW}File proxy.txt kosong, berjalan tanpa proxy{Style.RESET_ALL}")
+        return proxies
+    except Exception as e:
+        print(f"{Fore.RED}Gagal membaca proxy.txt: {str(e)}{Style.RESET_ALL}")
+        return []
+
+class ProxyManager:
+    def __init__(self):
+        self.proxies = load_proxies()
+        self.current_index = 0
+    
+    def get_proxy_for_address(self):
+        if not self.proxies:
+            return None
+        proxy = self.proxies[self.current_index]
+        proxy_dict = {"http": proxy, "https": proxy}
+        print(f"{Fore.BLUE}Menggunakan proxy: {proxy}{Style.RESET_ALL}")
+        self.current_index = (self.current_index + 1) % len(self.proxies)
+        return proxy_dict
+
+proxy_manager = ProxyManager()
+
 def check_rpc_connection():
     try:
         if w3.is_connected():
@@ -68,7 +98,7 @@ def create_signature(private_key, message="pharos"):
         print(f"{Fore.RED}Gagal membuat signature: {str(e)}{Style.RESET_ALL}")
         return None, None
 
-def login(address, signature, retries=3):
+def login(address, signature, proxy, retries=3):
     login_params = {
         "address": address,
         "signature": signature,
@@ -77,13 +107,13 @@ def login(address, signature, retries=3):
     
     for attempt in range(retries):
         try:
-            response = requests.post(LOGIN_URL, headers=HEADERS, params=login_params)
+            response = requests.post(LOGIN_URL, headers=HEADERS, params=login_params, proxies=proxy)
             if response.status_code == 200 and response.json().get("code") == 0:
                 print(f"{Fore.GREEN}Login berhasil untuk {address}{Style.RESET_ALL}")
                 return response.json().get("data").get("jwt")
             print(f"{Fore.RED}Login gagal (Percobaan {attempt+1}/{retries}): {response.json()}{Style.RESET_ALL}")
         except Exception as e:
-            print(f"{Fore.RED}Gagal login (Percobaan {attempt+1}/{retries}): {str(e)}{Style.RESET_ALL}")
+            print(f"{Fore.RED}Gagal login dengan proxy (Percobaan {attempt+1}/{retries}): {str(e)}{Style.RESET_ALL}")
         
         if attempt < retries - 1:
             print(f"{Fore.YELLOW}Menunggu 2 detik sebelum retry...{Style.RESET_ALL}")
@@ -98,7 +128,9 @@ def claim_faucet(address, private_key):
         print(f"{Fore.RED}Gagal membuat signature atau address tidak cocok{Style.RESET_ALL}")
         return False
     
-    jwt = login(address, signature)
+    proxy = proxy_manager.get_proxy_for_address()
+    
+    jwt = login(address, signature, proxy)
     if not jwt:
         print(f"{Fore.RED}Gagal login{Style.RESET_ALL}")
         return False
@@ -108,13 +140,13 @@ def claim_faucet(address, private_key):
     
     for attempt in range(3):
         try:
-            response = requests.post(f"{FAUCET_URL}?address={address}", headers=headers)
+            response = requests.post(f"{FAUCET_URL}?address={address}", headers=headers, proxies=proxy)
             if response.status_code == 200:
                 print(f"{Fore.GREEN}Berhasil klaim faucet untuk {address}{Style.RESET_ALL}")
                 return True
             print(f"{Fore.RED}Gagal klaim faucet (Percobaan {attempt+1}/3): {response.json()}{Style.RESET_ALL}")
         except Exception as e:
-            print(f"{Fore.RED}Gagal klaim faucet (Percobaan {attempt+1}/3): {str(e)}{Style.RESET_ALL}")
+            print(f"{Fore.RED}Gagal klaim faucet dengan proxy (Percobaan {attempt+1}/3): {str(e)}{Style.RESET_ALL}")
         
         if attempt < 2:
             print(f"{Fore.YELLOW}Menunggu 2 detik sebelum retry...{Style.RESET_ALL}")
@@ -200,7 +232,8 @@ def process_batch(recipient, batch_size=10):
     for i, (address, private_key) in enumerate(wallets[:]):
         signature, recovered_address = create_signature(private_key)
         if signature and recovered_address.lower() == address.lower():
-            jwt = login(address, signature)
+            proxy = proxy_manager.get_proxy_for_address()
+            jwt = login(address, signature, proxy)
             if jwt:
                 wallets[i] = (address, private_key, jwt)
             else:
@@ -217,8 +250,9 @@ def process_batch(recipient, batch_size=10):
         address, private_key, jwt = wallet
         headers = HEADERS.copy()
         headers["Authorization"] = f"Bearer {jwt}"
+        proxy = proxy_manager.get_proxy_for_address()
         try:
-            response = requests.post(f"{FAUCET_URL}?address={address}", headers=headers)
+            response = requests.post(f"{FAUCET_URL}?address={address}", headers=headers, proxies=proxy)
             if response.status_code == 200:
                 print(f"{Fore.GREEN}Berhasil klaim faucet untuk {address}{Style.RESET_ALL}")
             else:
@@ -284,4 +318,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-        
