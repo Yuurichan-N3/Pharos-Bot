@@ -1,2 +1,2 @@
 # Pharos-Bot
-Pharos Faucet Bot
+https://2captcha.com/
